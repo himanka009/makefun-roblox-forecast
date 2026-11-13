@@ -4,7 +4,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from main import forecast, read_history, timestamp
+from main import forecast, read_history, timestamp, validate_forecast
 
 
 class ForecastTests(unittest.TestCase):
@@ -85,6 +85,47 @@ class ForecastTests(unittest.TestCase):
     def test_insufficient_history_fails_explicitly(self):
         with self.assertRaises(ValueError):
             forecast(self.task, [(490896, {1: 1})])
+
+    def test_output_validation_preserves_serialization(self):
+        result = forecast(self.task, self.history)
+        expected = (json.dumps(result, separators=(',', ':'), allow_nan=False) + '\n').encode('utf-8')
+        self.assertEqual(validate_forecast(result), expected)
+
+    def test_output_validation_rejects_invalid_contracts(self):
+        valid = {'probabilities': [], 'top10': list(range(1, 11))}
+        row = {'universe_id': 1, 'place': 1, 'p': 0.6}
+        invalid = [
+            dict(valid, extra=True),
+            dict(valid, top10=[1] * 10),
+            dict(valid, top10=[True] + list(range(2, 11))),
+            dict(valid, top10=[0] + list(range(2, 11))),
+            dict(valid, probabilities=[dict(row, p=float('nan'))]),
+            dict(valid, probabilities=[dict(row, p=float('inf'))]),
+            dict(valid, probabilities=[dict(row, p=-0.1)]),
+            dict(valid, probabilities=[dict(row, p=1.1)]),
+            dict(valid, probabilities=[dict(row, p=True)]),
+            dict(valid, probabilities=[row, row.copy()]),
+            dict(valid, probabilities=[row, dict(row, universe_id=2)]),
+            dict(valid, probabilities=[dict(row, extra=1)]),
+            dict(valid, probabilities=[dict(row, place=11)]),
+            dict(valid, probabilities=[dict(row, universe_id=0)]),
+            dict(valid, probabilities=[dict(row, universe_id=i, p=0.001)
+                                       for i in range(1, 102)]),
+            dict(valid, probabilities={}),
+        ]
+        for result in invalid:
+            with self.subTest(result=result):
+                with self.assertRaises(ValueError):
+                    validate_forecast(result)
+
+    def test_output_validation_checks_encoded_size(self):
+        # Legal integer ids can still make the encoded document too large.
+        huge_id = 10 ** 2000
+        result = {'top10': list(range(1, 11)), 'probabilities': [
+            {'universe_id': huge_id + i, 'place': place, 'p': 0.001}
+            for place in range(1, 11) for i in range(100)]}
+        with self.assertRaisesRegex(ValueError, 'one MiB'):
+            validate_forecast(result)
 
 
 if __name__ == '__main__':

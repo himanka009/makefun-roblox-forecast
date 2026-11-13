@@ -27,6 +27,9 @@ The 60 strongest observed candidates receive 78% of each place's probability;
 selects distinct candidates by place score. Numeric ID tie breaks and fixed
 serialization make repeated runs byte-identical. This is a conservative
 heuristic, not a trained or calibrated claim of forecasting accuracy.
+Before writing, production validation checks the exact schema, positive integer
+IDs, distinct top10 and row pairs, finite probabilities, per-place row and mass
+limits, and the one MiB limit on the actual encoded UTF-8 output.
 
 Run tests with `python3.13 -m unittest -v`. Practice validation checks output
 shape, finite probabilities, limits, observed IDs and byte determinism.

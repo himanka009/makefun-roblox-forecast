@@ -98,13 +98,53 @@ def forecast(task, snapshots):
     return {'probabilities': rows, 'top10': top10}
 
 
+def validate_forecast(result):
+    """Validate the output contract and return its checked UTF-8 encoding."""
+    if not isinstance(result, dict) or set(result) != {'probabilities', 'top10'}:
+        raise ValueError('forecast must have exactly probabilities and top10')
+    top10 = result['top10']
+    if (not isinstance(top10, list) or len(top10) != 10
+            or any(type(uid) is not int or uid <= 0 for uid in top10)
+            or len(set(top10)) != 10):
+        raise ValueError('top10 must contain ten distinct positive integer ids')
+    if not isinstance(result['probabilities'], list):
+        raise ValueError('probabilities must be a list')
+    seen = set()
+    counts = [0] * 10
+    values = [[] for _ in range(10)]
+    for row in result['probabilities']:
+        if not isinstance(row, dict) or set(row) != {'universe_id', 'place', 'p'}:
+            raise ValueError('probability row has invalid fields')
+        uid, place, probability = row['universe_id'], row['place'], row['p']
+        if type(uid) is not int or uid <= 0 or type(place) is not int or not 1 <= place <= 10:
+            raise ValueError('probability row has invalid id or place')
+        if (type(probability) not in (int, float) or not 0 <= probability <= 1
+                or not math.isfinite(probability)):
+            raise ValueError('probability must be finite and between zero and one')
+        pair = uid, place
+        if pair in seen:
+            raise ValueError('duplicate universe id and place')
+        seen.add(pair)
+        counts[place - 1] += 1
+        values[place - 1].append(probability)
+    if any(count > 100 for count in counts):
+        raise ValueError('each place permits at most 100 rows')
+    if any(math.fsum(probabilities) > 1 for probabilities in values):
+        raise ValueError('probabilities at each place must total at most one')
+    encoded = (json.dumps(result, separators=(',', ':'), allow_nan=False) + '\n').encode('utf-8')
+    if len(encoded) > 1_048_576:
+        raise ValueError('forecast exceeds one MiB')
+    return encoded
+
+
 def main():
     input_dir = Path(os.environ.get('MAKEFUN_INPUT_DIR', '/input'))
     output_dir = Path(os.environ.get('MAKEFUN_OUTPUT_DIR', '/output'))
     task = json.loads((input_dir / 'task.json').read_text())
     result = forecast(task, read_history(input_dir / 'history.ndjson'))
+    encoded = validate_forecast(result)
     output_dir.mkdir(parents=True, exist_ok=True)
-    (output_dir / 'forecast.json').write_text(json.dumps(result, separators=(',', ':'), allow_nan=False) + '\n')
+    (output_dir / 'forecast.json').write_bytes(encoded)
 
 
 if __name__ == '__main__':
