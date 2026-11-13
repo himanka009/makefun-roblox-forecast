@@ -4,7 +4,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from main import forecast, read_history
+from main import forecast, read_history, timestamp
 
 
 class ForecastTests(unittest.TestCase):
@@ -53,6 +53,34 @@ class ForecastTests(unittest.TestCase):
         changed = [(t, {uid: 21 - rank for uid, rank in ranks.items()})
                    for t, ranks in self.history]
         self.assertNotEqual(before, forecast(self.task, changed))
+
+    def test_future_observations_excluded_sorted_and_unsorted(self):
+        start = timestamp(self.task['window']['from'])
+        future = [(start, {900 + i: i + 1 for i in range(20)}),
+                  (start + 12, {1000 + i: i + 1 for i in range(20)})]
+        expected = forecast(self.task, self.history)
+        for records in (self.history + future, list(reversed(self.history + future))):
+            self.assertEqual(forecast(self.task, records), expected)
+
+    def test_earliest_cutoff_and_exclusive_boundary(self):
+        start = timestamp(self.task['window']['from'])
+        cutoff = start - 12
+        task = dict(self.task, history_until='2026-01-01T12:00:00Z')
+        expected = forecast(self.task, [(at, ranks) for at, ranks in self.history
+                                        if at < cutoff])
+        self.assertEqual(forecast(task, list(reversed(self.history))), expected)
+        # A history_until later than the window must not admit window data.
+        later = dict(self.task, history_until='2026-01-03T00:00:00Z')
+        future = (start, {2000 + i: i + 1 for i in range(20)})
+        self.assertEqual(forecast(later, self.history + [future]),
+                         forecast(self.task, self.history))
+
+    def test_empty_post_cutoff_history_fails_explicitly(self):
+        start = timestamp(self.task['window']['from'])
+        for records in ([], [(start, self.history[0][1])],
+                        [(start + 1, self.history[0][1])]):
+            with self.assertRaisesRegex(ValueError, 'before the task cutoff'):
+                forecast(self.task, records)
 
     def test_insufficient_history_fails_explicitly(self):
         with self.assertRaises(ValueError):

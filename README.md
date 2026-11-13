@@ -7,13 +7,16 @@ randomness, credentials, or third-party dependencies.
 Run `python3.13 main.py`. Input defaults to `/input` and output to
 `/output/forecast.json`; override with `MAKEFUN_INPUT_DIR` and
 `MAKEFUN_OUTPUT_DIR`. The input contains `task.json` and `history.ndjson`.
-The forecast window is read from the task, never hardcoded.
+The forecast window is read from the task, never hardcoded. Observations
+at or after the earlier of `history_until` and the window start are excluded;
+retained observations are sorted, and an empty retained history fails explicitly.
 
 The model mixes exponentially decayed observed rank frequencies (25%),
 positive-rank-normalized Gaussian kernels around damped recent rank trends
 (60%), and a broader historical rank kernel (15%). Time quadrature weights
 irregular reads, limiting the effect of changing recorder cadence. Twelve
-midpoints integrate uncertainty over the requested horizon. Absent games
+midpoints integrate uncertainty over the requested horizon. Each candidate's
+time-kernel normalization is computed once per midpoint and reused across places. Absent games
 lose influence with time. Optional player counts, details and other charts
 are deliberately unused, so missing or malformed optional values cannot
 change the forecast. Invalid rank rows are ignored; missing required files,

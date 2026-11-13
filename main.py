@@ -38,7 +38,11 @@ def forecast(task, snapshots):
     horizon = timestamp(task['window']['until']) - start
     if horizon <= 0:
         raise ValueError('forecast window must have positive duration')
-    latest_time, latest = snapshots[-1]
+    cutoff = min(start, timestamp(task.get('history_until', task['window']['from'])))
+    snapshots = sorted(((at, ranks) for at, ranks in snapshots if at < cutoff),
+                       key=lambda snapshot: snapshot[0])
+    if not snapshots:
+        raise ValueError('history contains no observations before the task cutoff')
     ids = sorted({uid for _, ranks in snapshots for uid in ranks})
     if len(ids) < 10:
         raise ValueError('need at least ten observed universe ids')
@@ -59,17 +63,20 @@ def forecast(task, snapshots):
         slope = (last_rank - old_rank) / max(8, last_at - old_at)
         slope = max(-0.4, min(0.4, slope))
         survival = math.exp(-max(0, start - last_at) / 36)
+        time_kernels = []
+        for step in range(12):
+            ahead = max(0, start - last_at) + horizon * (step + 0.5) / 12
+            center = max(1, last_rank + slope * 18 * (1 - math.exp(-ahead / 18)))
+            width = 1.5 + 0.075 * ahead + 0.10 * min(last_rank, 30)
+            # Discrete normalization accounts for the rank-one boundary.
+            normalizer = sum(math.exp(-0.5 * ((rank - center) / width) ** 2)
+                             for rank in range(1, max(120, int(center + 8 * width)) + 1))
+            time_kernels.append((center, width, normalizer))
         for place in range(1, 11):
             frequency = sum(w for w, (_, ranks) in zip(weights, snapshots)
                             if ranks.get(uid) == place) / total_weight
             kernel = 0.0
-            for step in range(12):
-                ahead = max(0, start - last_at) + horizon * (step + 0.5) / 12
-                center = max(1, last_rank + slope * 18 * (1 - math.exp(-ahead / 18)))
-                width = 1.5 + 0.075 * ahead + 0.10 * min(last_rank, 30)
-                # Discrete normalization accounts for the rank-one boundary.
-                normalizer = sum(math.exp(-0.5 * ((rank - center) / width) ** 2)
-                                 for rank in range(1, max(120, int(center + 8 * width)) + 1))
+            for center, width, normalizer in time_kernels:
                 kernel += math.exp(-0.5 * ((place - center) / width) ** 2) / normalizer / 12
             broad = sum(w * math.exp(-abs(ranks.get(uid, 200) - place) / 12)
                         for w, (_, ranks) in zip(weights, snapshots)) / total_weight / 24
